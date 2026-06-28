@@ -116,6 +116,37 @@ class ResidualConnection(nn.Module):
 
 
 
+class EncoderBlock(nn.Module):
+
+    def __init__(self, self_attention: MultiHeadAttention, feed_forward: FeedForwardLayer, dropout: float):
+        super().__init__()
+        self.self_attention = self_attention
+        self.feed_forward = feed_forward
+        self.residual_connection1 = ResidualConnection(dropout)
+        self.residual_connection2 = ResidualConnection(dropout)
+
+    def forward(self,x, src_mask):
+        x = self.residual_connection1(x,lambda x : self.self_attention(x,x,x,src_mask))
+        x = self.residual_connection2(x, self.feed_forward)
+        return x
+    
+#since an encoder can have n encoder blocks
+class Encoder(nn.Module):
+
+    def __init__(self, layers: nn.ModuleList):
+        super().__init__()
+        self.layers = layers
+        self.norm  = LayerNormalization()
+
+    def forward(self,x,mask):
+        for layer in self.layers:
+            x = layer(x,mask)
+        return self.norm(x)
+             
+    
+
+
+
 
 
 
