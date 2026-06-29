@@ -142,10 +142,91 @@ class Encoder(nn.Module):
         for layer in self.layers:
             x = layer(x,mask)
         return self.norm(x)
-             
     
 
 
+class DecoderBlock(nn.Module):
+
+    def __init__(self, self_attention: MultiHeadAttention, cross_attention: MultiHeadAttention, feed_forward: FeedForwardLayer, dropout: float):
+        super().__init__()
+        self.self_attention = self_attention
+        self.cross_attention = cross_attention
+        self.feed_forward = feed_forward
+        self.residual_connection1 = ResidualConnection(dropout)
+        self.residual_connection2 = ResidualConnection(dropout)
+        self.residual_connection3 = ResidualConnection(dropout)
+
+    def forward(self,x,enc_output,src_mask,tgt_mask):
+        x = self.residual_connection1(x,lambda x : self.self_attention(x,x,x,tgt_mask))
+        x = self.residual_connection2(x,lambda x : self.cross_attention(x,enc_output,enc_output,src_mask))
+        x = self.residual_connection3(x,self.feed_forward)
+        return x
+             
+
+class Decoder(nn.Module):
+
+    def __init__(self, layers: nn.ModuleList):
+        super().__init__()
+        self.layers = layers
+        self.norm  = LayerNormalization()
+
+    def forward(self,x,enc_output,src_mask,tgt_mask):
+        for layer in self.layers:
+            x = layer(x,enc_output,src_mask,tgt_mask)
+        return self.norm(x)
+
+
+class ProjectionLayer(nn.Module):
+    def __init__(self,d_model:int, vocab_size:int):
+        super().__init__()
+        self.linear = nn.Linear(d_model,vocab_size)
+
+    def forward(self,x):
+        return self.log_softmax(self.linear(x),dim=-1)
+
+
+
+
+class Transformer(nn.Module):
+    def __init__(self, encoder: Encoder, decoder: Decoder, src_embedding: InputEmbeddings, tgt_embedding: InputEmbeddings, src_positional_encoding: PositionalEncoding, tgt_positional_encoding: PositionalEncoding, projection_layer: ProjectionLayer):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.src_embedding = src_embedding
+        self.tgt_embedding = tgt_embedding
+        self.src_positional_encoding = src_positional_encoding
+        self.tgt_positional_encoding = tgt_positional_encoding
+        self.projection_layer = projection_layer
+
+    def encoder_forward(self, src, src_mask):
+        src_embedded = self.src_embedding(src)
+        src_encoded = self.src_positional_encoding(src_embedded)
+        return self.encoder(src_encoded, src_mask)
+    
+    def decode(self, tgt, enc_output, src_mask, tgt_mask):
+        tgt_embedded = self.tgt_embedding(tgt)
+        tgt_encoded = self.tgt_positional_encoding(tgt_embedded)
+        return self.decoder(tgt_encoded, enc_output, src_mask, tgt_mask)
+    
+    def project(self, x):
+        return self.projection_layer(x)
+    
+
+# now that we have all our blocks lets start bulding our transformer
+def build_transformer(src_vocab_size:int, tgt_vocab_size:int, src_seq_len:int, tgt_seq_len:int, d_model:int  , d_ff:int, h:int, num_encoder_layers:int, num_decoder_layers:int, dropout:float):
+    src_embedding = InputEmbeddings(d_model, src_vocab_size)
+    tgt_embedding = InputEmbeddings(d_model, tgt_vocab_size)
+    src_positional_encoding = PositionalEncoding(d_model, src_seq_len, dropout)
+    tgt_positional_encoding = PositionalEncoding(d_model, tgt_seq_len, dropout)
+    projection_layer = ProjectionLayer(d_model, tgt_vocab_size)
+
+    encoder_layers = nn.ModuleList([EncoderBlock(MultiHeadAttention(d_model,h,dropout), FeedForwardLayer(d_model,d_ff,dropout), dropout) for _ in range(num_encoder_layers)])
+    decoder_layers = nn.ModuleList([DecoderBlock(MultiHeadAttention(d_model,h,dropout), MultiHeadAttention(d_model,h,dropout), FeedForwardLayer(d_model,d_ff,dropout), dropout) for _ in range(num_decoder_layers)])
+
+    encoder = Encoder(encoder_layers)
+    decoder = Decoder(decoder_layers)
+
+    return Transformer(encoder, decoder, src_embedding, tgt_embedding, src_positional_encoding, tgt_positional_encoding, projection_layer)
 
 
 
